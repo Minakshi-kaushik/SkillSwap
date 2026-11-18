@@ -1,0 +1,3 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import 'tailwindcss';
+:root{font-family:Inter,sans-serif;color:#283a35;background:#f7f5ef;font-synthesis:none;text-rendering:optimizeLegibility;--green:#245b45;--sage:#e8f0e9;--muted:#758078;--border:#e8eae5;--heading:'Plus Jakarta Sans',sans-serif}*{box-sizing:border-box}body{margin:0;min-width:320px}button,a{font:inherit}a{color:inherit;text-decoration:none}button{cursor:pointer}button:focus-visible,a:focus-visible{outline:3px solid #89ad98;outline-offset:3px}h1,h2,h3{font-family:var(--heading)}
