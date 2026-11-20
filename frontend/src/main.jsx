@@ -12,6 +12,10 @@ import './pages/auth/Auth.css'
 import './pages/onboarding/Onboarding.css'
 import './pages/auth/AuthFix.css'
 import './AppFix.css'
+import './pages/discovery/Discovery.css'
+import './pages/messaging/Messages.css'
+import './pages/sessions/Sessions.css'
+import './pages/notifications/Notifications.css'
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } })
 

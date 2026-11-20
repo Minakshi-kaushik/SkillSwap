@@ -20,7 +20,7 @@ export function AuthProvider({ children }) {
     if (!activeSession?.access_token) return null
     setProfileError('')
     try {
-      const result = await apiRequest('/api/v1/auth/me', { token: activeSession.access_token })
+      const result = await apiRequest('/auth/me', { token: activeSession.access_token })
       const nextProfile = normalizeProfile(result)
       setProfile(nextProfile)
       return nextProfile
@@ -28,6 +28,17 @@ export function AuthProvider({ children }) {
       setProfileError(error.message)
       throw error
     }
+  }, [])
+
+  const signOut = useCallback(async () => {
+    if (!supabase) throw new Error('Authentication is not configured.')
+    const { error } = await supabase.auth.signOut()
+    if (error) throw error
+    setSession(null)
+    setProfile(null)
+    setProfileError('')
+    setRecoverySession(false)
+    setLoading(false)
   }, [])
 
   useEffect(() => {
@@ -83,7 +94,8 @@ export function AuthProvider({ children }) {
     profileError,
     recoverySession,
     refreshProfile,
+    signOut,
     clearRecoverySession: () => setRecoverySession(false),
-  }), [session, profile, loading, profileError, recoverySession, refreshProfile])
+  }), [session, profile, loading, profileError, recoverySession, refreshProfile, signOut])
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

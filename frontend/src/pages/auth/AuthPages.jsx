@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, ArrowRight, Eye, EyeOff, KeyRound, Mail, ShieldCheck, Sparkles } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Eye, EyeOff, KeyRound, LoaderCircle, Mail, ShieldCheck, Sparkles } from 'lucide-react'
 import { Logo } from '../../components/common/Logo'
 import { Button } from '../../components/common/Button'
 import { Input } from '../../components/common/Input'
@@ -70,7 +70,7 @@ export function LoginPage() {
     if (!supabase || !form.email.trim()) return setError('Enter your email address first so we know where to send the verification link.')
     setResending(true); setError(''); setNotice('')
     try {
-      const { error: resendError } = await supabase.auth.resend({ type: 'signup', email: form.email.trim(), options: { emailRedirectTo: `${window.location.origin}/login?verified=1` } })
+      const { error: resendError } = await supabase.auth.resend({ type: 'signup', email: form.email.trim(), options: { emailRedirectTo: `${window.location.origin}/auth/callback` } })
       if (resendError) throw resendError
       setNotice('A new verification link has been sent. Check your inbox.')
     } catch (resendError) { setError(authError(resendError)) }
@@ -80,6 +80,7 @@ export function LoginPage() {
   return <AuthShell eyebrow="Welcome back" title="Good to see you." description="Sign in to pick up where your learning journey left off." sideTitle="Your next skill is closer than you think." sideCopy="Meet people who are ready to share what they know and learn what you’re excited about." alternate={<>New to SkillSwap? <Link to="/signup">Create an account <ArrowRight size={14}/></Link></>}>
     <ConfigurationNote/>{params.get('verified') === '1' && <div className="form-success" role="status"><ShieldCheck size={17}/> Your email is verified. You can now log in.</div>}{error && <div className="form-alert" role="alert">{error}{/verify your email/i.test(error) && <button type="button" className="text-action" onClick={resendVerification} disabled={resending}>{resending ? 'Sending…' : 'Resend verification email'}</button>}</div>}{notice && <div className="form-success" role="status">{notice}</div>}
     <form className="auth-form" onSubmit={submit} noValidate><Input label="Email address" name="email" type="email" autoComplete="email" placeholder="you@example.com" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required/><PasswordField value={form.password} onChange={e => setForm({ ...form, password: e.target.value })}/><div className="form-meta"><span>Use your SkillSwap account email</span><Link to="/forgot-password">Forgot password?</Link></div><Button type="submit" disabled={busy || !supabase} className="auth-submit">{busy ? 'Signing in…' : 'Log in'} {!busy && <ArrowRight size={16}/>}</Button></form>
+    {import.meta.env.DEV && <Link to="/demo" className="demo-login-link"><span className="demo-mode-badge">DEMO</span><span><strong>Explore Demo Dashboard</strong><small>Try the student experience with sample data</small></span><ArrowRight size={16}/></Link>}
   </AuthShell>
 }
 
@@ -105,7 +106,7 @@ export function SignupPage() {
     try {
       const { data, error: signUpError } = await supabase.auth.signUp({
         email: form.email.trim(), password: form.password,
-        options: { data: { full_name: form.fullName.trim(), username: form.username.trim().toLowerCase() }, emailRedirectTo: `${window.location.origin}/login?verified=1` },
+        options: { data: { full_name: form.fullName.trim(), username: form.username.trim().toLowerCase() }, emailRedirectTo: `${window.location.origin}/auth/callback` },
       })
       if (signUpError) throw signUpError
       if (data.session && !data.user?.email_confirmed_at) {
@@ -121,7 +122,7 @@ export function SignupPage() {
     if (!supabase) return
     setResending(true); setError(''); setResendNotice('')
     try {
-      const { error: resendError } = await supabase.auth.resend({ type: 'signup', email: form.email.trim(), options: { emailRedirectTo: `${window.location.origin}/login?verified=1` } })
+      const { error: resendError } = await supabase.auth.resend({ type: 'signup', email: form.email.trim(), options: { emailRedirectTo: `${window.location.origin}/auth/callback` } })
       if (resendError) throw resendError
       setResendNotice('A new verification email has been sent.')
     } catch (resendError) { setError(authError(resendError)) }
@@ -164,6 +165,41 @@ export function ResetPasswordPage() {
   }
   return <AuthShell eyebrow="Choose a new password" title={success ? 'Password updated.' : 'Set a new password.'} description={success ? 'Your password has been updated. Log in with your new password to continue.' : 'Choose a new password to secure your SkillSwap account.'} sideTitle="Your learning journey is waiting." sideCopy="Get back to learning and sharing with a password you’ll remember." alternate={<Link to="/login"><ArrowLeft size={14}/> Back to log in</Link>}>
     {success ? <div className="verify-card"><span className="verify-icon"><KeyRound size={23}/></span><strong>You’re all set</strong><p>Your password was changed successfully.</p><Button to="/login">Go to login <ArrowRight size={16}/></Button></div> : recoverySession ? <>{error && <div className="form-alert" role="alert">{error}</div>}<form className="auth-form" onSubmit={submit}><PasswordField label="New password" name="password" autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} hint="Use at least 8 characters."/><PasswordField label="Confirm new password" name="confirm" autoComplete="new-password" value={confirm} onChange={e => setConfirm(e.target.value)}/><Button type="submit" disabled={busy || !supabase} className="auth-submit">{busy ? 'Updating password…' : 'Update password'} {!busy && <ArrowRight size={16}/>}</Button></form></> : <div className="form-alert" role="status">Open the password reset link from your email to set a new password. <Link to="/forgot-password" className="text-action">Send another reset link</Link></div>}
+  </AuthShell>
+}
+
+export function AuthCallbackPage() {
+  const { session, profile, loading, profileError, refreshProfile } = useAuth()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const [settled, setSettled] = useState(false)
+  const [retrying, setRetrying] = useState(false)
+  const query = new URLSearchParams(location.search)
+  const hash = new URLSearchParams(location.hash.replace(/^#/, ''))
+  const errorDescription = query.get('error_description') || hash.get('error_description')
+  const errorCode = query.get('error_code') || query.get('error') || hash.get('error_code') || hash.get('error')
+
+  useEffect(() => {
+    if (loading || session || errorDescription || errorCode) return undefined
+    const timer = window.setTimeout(() => setSettled(true), 1500)
+    return () => window.clearTimeout(timer)
+  }, [loading, session, errorDescription, errorCode])
+
+  useEffect(() => {
+    if (!session || !profile || loading) return
+    if (profile.account_status === 'SUSPENDED') navigate('/suspended', { replace: true })
+    else navigate(profile.onboarding_completed ? '/dashboard' : '/onboarding', { replace: true })
+  }, [session, profile, loading, navigate])
+
+  async function retryProfile() {
+    setRetrying(true)
+    try { await refreshProfile(session) } catch { /* The inline profile error remains available for the user. */ }
+    finally { setRetrying(false) }
+  }
+
+  const expiredLink = /expired|invalid|already used|access_denied/i.test(`${errorCode ?? ''} ${errorDescription ?? ''}`)
+  return <AuthShell eyebrow="Email verification" title={errorDescription ? (expiredLink ? 'This verification link has expired.' : 'We couldn’t verify this link.') : 'Finishing your sign-in…'} description={errorDescription ? 'Request a fresh verification email, then open its link from the same address you used to sign up.' : 'Your email confirmation is being checked securely with Supabase.'} sideTitle="One last step to get started." sideCopy="Once your email is confirmed, we’ll take you to the right place in your SkillSwap account.">
+    {errorDescription ? <div className="verify-card"><span className="verify-icon"><ShieldCheck size={23}/></span><strong>{errorCode || 'Verification error'}</strong><p>{errorDescription}</p><Button to="/login" variant="outline">Back to log in</Button></div> : loading || (session && !profile && !profileError) ? <div className="callback-loading" role="status"><LoaderCircle className="spin" size={20}/> Confirming your account…</div> : profileError ? <div className="verify-card"><strong>Your email link was received, but we couldn’t load your account.</strong><p>{profileError}</p><Button onClick={retryProfile} disabled={retrying}>{retrying ? 'Retrying…' : 'Retry account check'}</Button><Link to="/login" className="text-action">Go to log in</Link></div> : settled ? <div className="verify-card"><span className="verify-icon"><ShieldCheck size={23}/></span><strong>Email link processed</strong><p>If your address is verified, log in to continue. We couldn’t establish a session from this link.</p><Button to="/login?verified=1">Continue to log in</Button></div> : <div className="callback-loading" role="status"><LoaderCircle className="spin" size={20}/> Waiting for Supabase to establish your session…</div>}
   </AuthShell>
 }
 

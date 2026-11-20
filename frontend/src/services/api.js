@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://skillswap-api.mishrakrati789.workers.dev').replace(/\/$/, '')
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://skillswap-api.mishrakrati789.workers.dev').replace(/\/$/, '').replace(/\/api\/v1$/, '')
 
 export class ApiError extends Error {
   constructor(message, { status, code, details } = {}) {
@@ -22,7 +22,8 @@ export async function apiRequest(path, { token, ...options } = {}) {
 
   let response
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
+    const apiPath = path.startsWith('/api/v1/') ? path : `/api/v1${path.startsWith('/') ? path : `/${path}`}`
+    response = await fetch(`${API_BASE_URL}${apiPath}`, {
       ...options,
       headers: {
         Accept: 'application/json',
@@ -37,7 +38,15 @@ export async function apiRequest(path, { token, ...options } = {}) {
 
   const body = response.status === 204 ? null : await response.json().catch(() => null)
   if (!response.ok || body?.success === false) {
-    if (response.status === 401 && accessToken && supabase) await supabase.auth.signOut()
+    if (response.status === 401 && accessToken && supabase) {
+      const { data: refreshed } = await supabase.auth.refreshSession()
+      if (refreshed.session?.access_token && refreshed.session.access_token !== accessToken) {
+        const retry = await fetch(response.url, { ...options, headers: { Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}), Authorization: `Bearer ${refreshed.session.access_token}`, ...options.headers } })
+        const retryBody = retry.status === 204 ? null : await retry.json().catch(() => null)
+        if (retry.ok && retryBody?.success !== false) return retryBody?.success === true ? retryBody.data : retryBody
+      }
+      await supabase.auth.signOut()
+    }
     const errorBody = body?.error
     throw new ApiError(errorBody?.message || body?.message || `Request failed (${response.status}). Please try again.`, {
       status: response.status,
@@ -45,11 +54,11 @@ export async function apiRequest(path, { token, ...options } = {}) {
       details: errorBody?.details,
     })
   }
-  return body
+  return body?.success === true ? body.data : body
 }
 
 export function apiData(response) {
-  return response?.data ?? response
+  return response
 }
 
 export function apiErrorMessage(error) {

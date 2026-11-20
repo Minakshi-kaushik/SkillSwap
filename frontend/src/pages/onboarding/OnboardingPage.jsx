@@ -70,7 +70,7 @@ function SkillPicker({ title, selected, onChange }) {
   const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     let active = true
-    Promise.all([apiRequest('/api/v1/skills?limit=100'), apiRequest('/api/v1/skills/categories').catch(() => null)])
+    Promise.all([apiRequest('/skills?limit=100'), apiRequest('/skills/categories').catch(() => null)])
       .then(([result, categoryResult]) => {
         if (!active) return
         setSkills(normalizeList(result, ['skills', 'items']))
@@ -119,11 +119,11 @@ export function OnboardingPage() {
   useEffect(() => {
     let active = true
     const requests = [
-      apiRequest('/api/v1/profiles/me'),
-      apiRequest('/api/v1/users/me/skills?type=TEACH'),
-      apiRequest('/api/v1/users/me/skills?type=LEARN'),
-      apiRequest('/api/v1/learning/goals'),
-      apiRequest('/api/v1/availability/me'),
+      apiRequest('/profiles/me'),
+      apiRequest('/users/me/skills?type=TEACH'),
+      apiRequest('/users/me/skills?type=LEARN'),
+      apiRequest('/learning/goals'),
+      apiRequest('/availability/me'),
     ]
     Promise.allSettled(requests).then(results => {
       if (!active) return
@@ -159,10 +159,14 @@ export function OnboardingPage() {
           const daySlots = slots.filter(slot => slot.day_of_week === day.day_of_week && slot.is_active !== false).map(({ start_time, end_time }) => ({ start_time, end_time }))
           return { ...day, enabled: daySlots.length > 0, slots: daySlots.length ? daySlots : day.slots }
         }))
+        setAvailabilityTouched(false)
       }
+      const profileData = results[0].status === 'fulfilled' ? apiData(results[0].value)?.profile ?? apiData(results[0].value) : profile
+      const nextStep = !profileData?.full_name ? 0 : !profileData?.username ? 0 : !teaches.length ? 1 : !learns.length ? 2 : 3
+      setStep(current => current === 0 ? nextStep : current)
     }).finally(() => { if (active) setLoadingProgress(false) })
     return () => { active = false }
-  }, [user, progressRetry])
+  }, [user, progressRetry, profile])
 
   async function saveBasic() {
     if (!basic.full_name.trim() || basic.full_name.trim().length > 100) throw new Error('Enter a full name using 1 to 100 characters.')
@@ -181,9 +185,9 @@ export function OnboardingPage() {
       timezone: basic.timezone,
       ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
     }
-    await apiRequest('/api/v1/profiles/me', { method: 'PATCH', body: JSON.stringify(payload) })
-    const refreshed = apiData(await apiRequest('/api/v1/profiles/me'))
-    setBasic({ ...initialProfile(refreshed?.profile ?? refreshed, user), avatar_url: avatarUrl })
+    await apiRequest('/profiles/me', { method: 'PATCH', body: JSON.stringify(payload) })
+    const refreshed = apiData(await apiRequest('/profiles/me'))
+    setBasic(current => ({ ...current, ...initialProfile(refreshed?.profile ?? refreshed, user), avatar_url: avatarUrl }))
     setPhoto(null)
   }
 
@@ -208,28 +212,28 @@ export function OnboardingPage() {
       for (const [id, previous] of saved) {
         if (!chosen.has(id)) {
           if (!previous.record_id) throw new Error(`Could not identify the saved ${type.toLowerCase()} skill to remove. Retry loading your saved profile.`)
-          await apiRequest(`/api/v1/users/me/skills/${previous.record_id}`, { method: 'DELETE' })
+          await apiRequest(`/users/me/skills/${previous.record_id}`, { method: 'DELETE' })
         }
       }
       for (const [id, item] of chosen) {
         const previous = saved.get(id)
         const payload = { proficiency_level: item.proficiency_level, experience_description: item.experience_description.trim() || undefined }
-        if (!previous) await apiRequest('/api/v1/users/me/skills', { method: 'POST', body: JSON.stringify({ skill_id: item.skill_id, skill_type: type, ...payload }) })
+        if (!previous) await apiRequest('/users/me/skills', { method: 'POST', body: JSON.stringify({ skill_id: item.skill_id, skill_type: type, ...payload }) })
         else if (previous.proficiency_level !== item.proficiency_level || previous.experience_description !== item.experience_description.trim()) {
           if (!previous.record_id) throw new Error(`Could not identify the saved ${type.toLowerCase()} skill to update. Retry loading your saved profile.`)
-          await apiRequest(`/api/v1/users/me/skills/${previous.record_id}`, { method: 'PATCH', body: JSON.stringify(payload) })
+          await apiRequest(`/users/me/skills/${previous.record_id}`, { method: 'PATCH', body: JSON.stringify(payload) })
         }
       }
     } catch (saveError) {
       try {
-        const refreshed = normalizeMySkills(await apiRequest(`/api/v1/users/me/skills?type=${type}`))
+        const refreshed = normalizeMySkills(await apiRequest(`/users/me/skills?type=${type}`))
         setSavedSkills(current => ({ ...current, [type]: skillMap(refreshed) }))
         if (type === 'TEACH') setTeaching(refreshed)
         else setLearning(refreshed)
       } catch { /* Keep the original save error; progress restore can be retried. */ }
       throw saveError
     }
-    const refreshed = normalizeMySkills(await apiRequest(`/api/v1/users/me/skills?type=${type}`))
+    const refreshed = normalizeMySkills(await apiRequest(`/users/me/skills?type=${type}`))
     setSavedSkills(current => ({ ...current, [type]: skillMap(refreshed) }))
     if (type === 'TEACH') setTeaching(refreshed)
     else setLearning(refreshed)
@@ -238,16 +242,16 @@ export function OnboardingPage() {
   async function saveLearningGoals() {
     try {
       for (const goal of goals.filter(item => item.text.trim() && !item.is_saved)) {
-        await apiRequest('/api/v1/learning/goals', { method: 'POST', body: JSON.stringify({ title: goal.text.trim() }) })
+        await apiRequest('/learning/goals', { method: 'POST', body: JSON.stringify({ title: goal.text.trim() }) })
       }
     } catch (saveError) {
       try {
-        const refreshed = normalizeList(await apiRequest('/api/v1/learning/goals'), ['items', 'goals'])
+        const refreshed = normalizeList(await apiRequest('/learning/goals'), ['items', 'goals'])
         setGoals(refreshed.map(goal => ({ id: goal.id, server_id: goal.id, is_saved: true, text: goal.title ?? '' })))
       } catch { /* Keep the original save error; progress restore can be retried. */ }
       throw saveError
     }
-    const refreshed = normalizeList(await apiRequest('/api/v1/learning/goals'), ['items', 'goals'])
+    const refreshed = normalizeList(await apiRequest('/learning/goals'), ['items', 'goals'])
     setGoals(refreshed.map(goal => ({ id: goal.id, server_id: goal.id, is_saved: true, text: goal.title ?? '' })))
   }
 
@@ -264,8 +268,8 @@ export function OnboardingPage() {
       const sorted = [...day.slots].sort((a, b) => a.start_time.localeCompare(b.start_time))
       if (sorted.some((slot, index) => index > 0 && slot.start_time < sorted[index - 1].end_time)) throw new Error(`${day.name} availability times cannot overlap.`)
     }
-    await apiRequest('/api/v1/availability/me', { method: 'PUT', body: JSON.stringify({ timezone: availabilityTimezone || basic.timezone, slots }) })
-    const refreshed = apiData(await apiRequest('/api/v1/availability/me'))
+    await apiRequest('/availability/me', { method: 'PUT', body: JSON.stringify({ timezone: availabilityTimezone || basic.timezone, slots }) })
+    const refreshed = apiData(await apiRequest('/availability/me'))
     setAvailabilityTimezone(refreshed?.timezone ?? availabilityTimezone)
     setAvailability(current => current.map(day => {
       const daySlots = (refreshed?.slots ?? []).filter(slot => slot.day_of_week === day.day_of_week && slot.is_active !== false).map(({ start_time, end_time }) => ({ start_time, end_time }))
@@ -282,7 +286,7 @@ export function OnboardingPage() {
     if (!learning.length) missing.push('At least one skill to learn')
     if (missing.length) throw new Error(`Complete these requirements first: ${missing.join(', ')}.`)
     try {
-      await apiRequest('/api/v1/profiles/me', { method: 'PATCH', body: JSON.stringify({ onboarding_completed: true }) })
+      await apiRequest('/profiles/me', { method: 'PATCH', body: JSON.stringify({ onboarding_completed: true }) })
     } catch (completionError) {
       const details = completionError.details
       const backendMissing = Array.isArray(details) ? details : details?.missing
@@ -333,9 +337,9 @@ export function OnboardingPage() {
     if (goal.server_id) {
       setSaving(true)
       try {
-        await apiRequest(`/api/v1/learning/goals/${goal.server_id}`, { method: 'DELETE' })
+        await apiRequest(`/learning/goals/${goal.server_id}`, { method: 'DELETE' })
         setGoals(current => current.filter(item => item.id !== goal.id))
-        const refreshed = normalizeList(await apiRequest('/api/v1/learning/goals'), ['items', 'goals'])
+        const refreshed = normalizeList(await apiRequest('/learning/goals'), ['items', 'goals'])
         setGoals(refreshed.map(item => ({ id: item.id, server_id: item.id, is_saved: true, text: item.title ?? '' })))
       }
       catch (removeError) {
